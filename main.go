@@ -1,10 +1,12 @@
 package main
 
 import (
+	"errors"
 	"flag"
 	"github.com/opensourceways/community-robot-lib/gitlabclient"
 	"os"
 
+	"github.com/opensourceways/community-robot-lib/config"
 	"github.com/opensourceways/community-robot-lib/logrusutil"
 	liboptions "github.com/opensourceways/community-robot-lib/options"
 	framework "github.com/opensourceways/community-robot-lib/robot-gitlab-framework"
@@ -51,9 +53,30 @@ func main() {
 
 	defer secretAgent.Stop()
 
+	agent := config.NewConfigAgent(func() config.Config {
+		return &configuration{}
+	})
+	if err := agent.Start(o.service.ConfigFile); err != nil {
+		logrus.WithError(err).Errorf("start config: %s", o.service.ConfigFile)
+		return
+	}
+
+	defer agent.Stop()
+
 	c := gitlabclient.NewGitlabClient(secretAgent.GetTokenGenerator(o.gitlab.TokenPath), "https://source.openeuler.sh/api/v4")
 
-	p := newRobot(c)
+	r := newRobot(c, func() (*configuration, error) {
+		_, cfg := agent.GetConfig()
+		if c, ok := cfg.(*configuration); ok {
+			return c, nil
+		}
+		return nil, errors.New("can't convert to configuration")
+	})
 
-	framework.Run(p, o.service)
+	s := framework.NewService()
+	s.RegisterIssueCommentHandler(r.handleIssueCommentEvent)
+	s.RegisterMergeCommentEventHandler(r.handleMergeCommentEvent)
+	s.RegisterMergeEventHandler(r.handleMREvent)
+
+	s.Run(o.service.Port, o.service.GracePeriod)
 }

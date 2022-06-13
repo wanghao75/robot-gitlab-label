@@ -1,12 +1,10 @@
 package main
 
 import (
-	"fmt"
 	"github.com/opensourceways/community-robot-lib/gitlabclient"
 	"github.com/xanzy/go-gitlab"
 
 	"github.com/opensourceways/community-robot-lib/config"
-	framework "github.com/opensourceways/community-robot-lib/robot-gitlab-framework"
 	"github.com/opensourceways/community-robot-lib/utils"
 	"github.com/sirupsen/logrus"
 )
@@ -31,51 +29,27 @@ type iClient interface {
 	GetIssueLabels(projectID interface{}, issueID int) ([]string, error)
 }
 
-func newRobot(cli iClient) *robot {
-	return &robot{cli: cli}
+func newRobot(cli iClient, gc func() (*configuration, error)) *robot {
+	return &robot{getConfig: gc, cli: cli}
 }
 
 type robot struct {
-	cli iClient
+	agent     *config.ConfigAgent
+	getConfig func() (*configuration, error)
+	cli       iClient
 }
 
-func (bot *robot) NewConfig() config.Config {
-	return &configuration{}
-}
-
-func (bot *robot) RobotName() string {
-	return botName
-}
-
-func (bot *robot) getConfig(cfg config.Config, org, repo string) (*botConfig, error) {
-	c, ok := cfg.(*configuration)
-	if !ok {
-		return nil, fmt.Errorf("can't convert to configuration")
-	}
-
-	if bc := c.configFor(org, repo); bc != nil {
-		return bc, nil
-	}
-
-	return nil, fmt.Errorf("no config for this repo:%s/%s", org, repo)
-}
-
-func (bot *robot) RegisterEventHandler(p framework.HandlerRegister) {
-	p.RegisterIssueCommentHandler(bot.handleIssueCommentEvent)
-	p.RegisterMergeCommentEventHandler(bot.handleMergeCommentEvent)
-	p.RegisterMergeEventHandler(bot.handleMREvent)
-}
-
-func (bot *robot) handleMREvent(e *gitlab.MergeEvent, pc config.Config, log *logrus.Entry) error {
+func (bot *robot) handleMREvent(e *gitlab.MergeEvent, log *logrus.Entry) error {
 	org, repo := gitlabclient.GetMROrgAndRepo(e)
 
-	cfg, err := bot.getConfig(pc, org, repo)
+	c, err := bot.getConfig()
 	if err != nil {
 		return err
 	}
+	botCfg := c.configFor(org, repo)
 
 	merr := utils.NewMultiErrors()
-	if err = bot.handleClearLabel(e, cfg); err != nil {
+	if err = bot.handleClearLabel(e, botCfg); err != nil {
 		merr.AddError(err)
 	}
 
@@ -89,24 +63,25 @@ func (bot *robot) handleMREvent(e *gitlab.MergeEvent, pc config.Config, log *log
 
 	commitsCount := len(commits)
 
-	if err = bot.handleSquashLabel(e, commitsCount, projectID, cfg.SquashConfig); err != nil {
+	if err = bot.handleSquashLabel(e, commitsCount, projectID, botCfg.SquashConfig); err != nil {
 		merr.AddError(err)
 	}
 
 	return merr.Err()
 }
 
-func (bot *robot) handleMergeCommentEvent(e *gitlab.MergeCommentEvent, pc config.Config, log *logrus.Entry) error {
+func (bot *robot) handleMergeCommentEvent(e *gitlab.MergeCommentEvent, log *logrus.Entry) error {
 	if e.ObjectKind != "note" || e.MergeRequest.State != "opened" {
 		log.Debug("Event is not a creation of a comment or MR is not opened, skipping.")
 		return nil
 	}
 
 	org, repo := gitlabclient.GetMRCommentOrgAndRepo(e)
-	cfg, err := bot.getConfig(pc, org, repo)
+	c, err := bot.getConfig()
 	if err != nil {
 		return err
 	}
+	botCfg := c.configFor(org, repo)
 
 	toAdd, toRemove := getMatchedLabels(gitlabclient.GetMRCommentBody(e))
 	if len(toAdd) == 0 && len(toRemove) == 0 {
@@ -114,20 +89,21 @@ func (bot *robot) handleMergeCommentEvent(e *gitlab.MergeCommentEvent, pc config
 		return nil
 	}
 
-	return bot.handleMRLabels(e, toAdd, toRemove, cfg, log)
+	return bot.handleMRLabels(e, toAdd, toRemove, botCfg, log)
 }
 
-func (bot *robot) handleIssueCommentEvent(e *gitlab.IssueCommentEvent, pc config.Config, log *logrus.Entry) error {
+func (bot *robot) handleIssueCommentEvent(e *gitlab.IssueCommentEvent, log *logrus.Entry) error {
 	if e.ObjectKind != "note" || e.Issue.State != "opened" {
 		log.Debug("Event is not a creation of a comment or MR is not opened, skipping.")
 		return nil
 	}
 
 	org, repo := gitlabclient.GetIssueCommentOrgAndRepo(e)
-	cfg, err := bot.getConfig(pc, org, repo)
+	c, err := bot.getConfig()
 	if err != nil {
 		return err
 	}
+	botCfg := c.configFor(org, repo)
 
 	toAdd, toRemove := getMatchedLabels(gitlabclient.GetIssueCommentBody(e))
 	if len(toAdd) == 0 && len(toRemove) == 0 {
@@ -135,5 +111,5 @@ func (bot *robot) handleIssueCommentEvent(e *gitlab.IssueCommentEvent, pc config
 		return nil
 	}
 
-	return bot.handleIssueLabels(e, toAdd, toRemove, cfg, log)
+	return bot.handleIssueLabels(e, toAdd, toRemove, botCfg, log)
 }
