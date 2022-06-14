@@ -1,10 +1,10 @@
 package main
 
 import (
+	"fmt"
 	"github.com/opensourceways/community-robot-lib/gitlabclient"
 	"github.com/xanzy/go-gitlab"
 
-	"github.com/opensourceways/community-robot-lib/config"
 	"github.com/opensourceways/community-robot-lib/utils"
 	"github.com/sirupsen/logrus"
 )
@@ -34,12 +34,11 @@ func newRobot(cli iClient, gc func() (*configuration, error)) *robot {
 }
 
 type robot struct {
-	agent     *config.ConfigAgent
 	getConfig func() (*configuration, error)
 	cli       iClient
 }
 
-func (bot *robot) handleMREvent(e *gitlab.MergeEvent, log *logrus.Entry) error {
+func (bot *robot) HandleMergeEvent(e *gitlab.MergeEvent, log *logrus.Entry) error {
 	org, repo := gitlabclient.GetMROrgAndRepo(e)
 
 	c, err := bot.getConfig()
@@ -70,7 +69,8 @@ func (bot *robot) handleMREvent(e *gitlab.MergeEvent, log *logrus.Entry) error {
 	return merr.Err()
 }
 
-func (bot *robot) handleMergeCommentEvent(e *gitlab.MergeCommentEvent, log *logrus.Entry) error {
+func (bot *robot) HandleMergeCommentEvent(e *gitlab.MergeCommentEvent, log *logrus.Entry) error {
+	fmt.Println("mrc == ", e)
 	if e.ObjectKind != "note" || e.MergeRequest.State != "opened" {
 		log.Debug("Event is not a creation of a comment or MR is not opened, skipping.")
 		return nil
@@ -92,7 +92,7 @@ func (bot *robot) handleMergeCommentEvent(e *gitlab.MergeCommentEvent, log *logr
 	return bot.handleMRLabels(e, toAdd, toRemove, botCfg, log)
 }
 
-func (bot *robot) handleIssueCommentEvent(e *gitlab.IssueCommentEvent, log *logrus.Entry) error {
+func (bot *robot) HandleIssueCommentEvent(e *gitlab.IssueCommentEvent, log *logrus.Entry) error {
 	if e.ObjectKind != "note" || e.Issue.State != "opened" {
 		log.Debug("Event is not a creation of a comment or MR is not opened, skipping.")
 		return nil
