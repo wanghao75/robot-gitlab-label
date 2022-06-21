@@ -70,7 +70,6 @@ func (bot *robot) HandleMergeEvent(e *gitlab.MergeEvent, log *logrus.Entry) erro
 }
 
 func (bot *robot) HandleMergeCommentEvent(e *gitlab.MergeCommentEvent, log *logrus.Entry) error {
-	fmt.Println("mrc == ", e)
 	if e.ObjectKind != "note" || e.MergeRequest.State != "opened" {
 		log.Debug("Event is not a creation of a comment or MR is not opened, skipping.")
 		return nil
